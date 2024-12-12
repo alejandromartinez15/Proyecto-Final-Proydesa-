@@ -1,0 +1,274 @@
+-- Creación de tablas
+
+-- 1. Tabla Obras Sociales
+CREATE TABLE ObrasSociales (
+    ID_ObraSocial NUMBER CONSTRAINT OOSS_ID_PK PRIMARY KEY,
+    Nombre VARCHAR2(20) CHECK (Nombre IN ('PAMI', 'APROSS', 'PARTICULAR')) NOT NULL,
+    Coseguro NUMBER(10, 2)
+);
+
+-- 2. Tabla Pacientes
+CREATE TABLE Pacientes (
+    ID_Paciente NUMBER CONSTRAINT PACIENTES_ID_PK PRIMARY KEY,
+    Nombre VARCHAR2(50) NOT NULL,
+    Apellido VARCHAR2(50) NOT NULL,
+    DNI NUMBER(10) UNIQUE NOT NULL,
+    Telefon-o VARCHAR2(15),
+    Direccion VARCHAR2(100),
+    ID_ObraSocial NUMBER,
+    CONSTRAINT OOSS_ID_FK FOREIGN KEY (ID_ObraSocial) REFERENCES ObrasSociales(ID_ObraSocial)
+);
+
+-- 3. Tabla Especialidades
+CREATE TABLE Especialidades (
+    ID_Especialidad NUMBER CONSTRAINT ESPECIALIDADES_ID_PK PRIMARY KEY,
+    Nombre VARCHAR2(50) NOT NULL
+);
+
+-- 4. Tabla Medicos
+CREATE TABLE Medicos (
+    ID_Medico NUMBER CONSTRAINT MEDICOS_ID_PK PRIMARY KEY,
+    Nombre VARCHAR2(50) NOT NULL,
+    Apellido VARCHAR2(50) NOT NULL,
+    Matricula VARCHAR2(20) UNIQUE NOT NULL,
+    ID_Especialidad NUMBER,
+    CONSTRAINT ESPECIALIDADES_ID_FK FOREIGN KEY (ID_Especialidad) REFERENCES Especialidades(ID_Especialidad)
+);
+
+-- 5. Tabla Turnero
+CREATE TABLE Turnero (
+    ID_Turno NUMBER CONSTRAINT TURNERO_ID_PK PRIMARY KEY,
+    Fecha DATE CHECK (Fecha BETWEEN TO_DATE('2024-06-01', 'YYYY-MM-DD') AND TO_DATE('2024-12-31', 'YYYY-MM-DD')) NOT NULL,
+    Hora VARCHAR2(5) CHECK (Hora BETWEEN '10:00' AND '18:00') NOT NULL,
+    ID_Paciente NUMBER NOT NULL,
+    ID_Medico NUMBER NOT NULL,
+    CONSTRAINT PACIENTES_ID_FK FOREIGN KEY (ID_Paciente) REFERENCES Pacientes(ID_Paciente),
+    CONSTRAINT MEDICOS_ID_FK FOREIGN KEY (ID_Medico) REFERENCES Medicos(ID_Medico),
+    CONSTRAINT TURNERO_MEDICO_UNIQUE UNIQUE (Fecha, Hora, ID_Medico)
+);
+
+-- 6. Tabla Consultas
+CREATE TABLE Consultas (
+    ID_Consulta NUMBER CONSTRAINT CONSULTAS_ID_PK PRIMARY KEY,
+    ID_Turno NUMBER NOT NULL,
+    Diagnostico VARCHAR2(255),
+    Indicaciones VARCHAR2(255),
+    CONSTRAINT TURNERO_ID_FK FOREIGN KEY (ID_Turno) REFERENCES Turnero(ID_Turno)
+);
+
+-- Creación de sinónimos
+CREATE SYNONYM OOSS FOR ObrasSociales;
+
+-- Creación de índices
+CREATE INDEX idx_pacientes_dni ON Pacientes (DNI);
+CREATE INDEX idx_turnero_fecha_hora ON Turnero (Fecha, Hora);
+
+-- Creación de secuencias
+CREATE SEQUENCE seq_pacientes START WITH 1 INCREMENT BY 1 MAXVALUE 9999 NOCYCLE NOCACHE;
+CREATE SEQUENCE seq_obras_sociales START WITH 1 INCREMENT BY 1 MAXVALUE 9999 NOCYCLE NOCACHE;
+CREATE SEQUENCE seq_turnero START WITH 1 INCREMENT BY 1 MAXVALUE 9999 NOCYCLE NOCACHE;
+CREATE SEQUENCE seq_consultas START WITH 1 INCREMENT BY 1 MAXVALUE 9999 NOCYCLE NOCACHE;
+CREATE SEQUENCE seq_medicos START WITH 1 INCREMENT BY 1 MAXVALUE 9999 NOCYCLE NOCACHE;
+CREATE SEQUENCE seq_especialidades START WITH 1 INCREMENT BY 1 MAXVALUE 9999 NOCYCLE NOCACHE;
+
+-- Vista: Turnero Diario
+CREATE OR REPLACE VIEW Vista_Turnero_Diaro AS
+SELECT 
+    t.Fecha,
+    t.Hora,
+    t.ID_Paciente,
+    p.Nombre || ' ' || p.Apellido AS Nombre_Completo_Paciente,
+    p.ID_ObraSocial
+    FROM 
+    Turnero t
+JOIN Pacientes p ON t.ID_Paciente = p.ID_Paciente
+JOIN Medicos m ON t.ID_Medico = m.ID_Medico
+JOIN Especialidades e ON m.ID_Especialidad = e.ID_Especialidad
+WHERE 
+t.fecha = '11-Dec-2024' -- reemplazar por SYSDATE
+;
+
+-- Vista: Diagnósticos más frecuentes
+CREATE OR REPLACE VIEW Vista_Diagnosticos_Frecuentes AS
+SELECT diagnostico, COUNT(*) AS repeticiones
+FROM consultas
+
+GROUP BY diagnostico
+ORDER BY repeticiones DESC
+;
+
+-- Vista: Turnos atendidos por Médico
+CREATE OR REPLACE VIEW Vista_Turnos_Por_Medico AS
+SELECT 
+    m.Nombre || ' ' || m.Apellido AS Nombre_Completo_Medico,
+    e.Nombre AS Especialidad,
+    COUNT(t.ID_Turno) AS Cantidad_Turnos
+FROM 
+    Medicos m
+JOIN Turnero t ON m.ID_Medico = t.ID_Medico
+JOIN Especialidades e ON m.ID_Especialidad = e.ID_Especialidad
+WHERE t.fecha < SYSDATE
+GROUP BY 
+    m.Nombre, m.Apellido, e.Nombre;
+
+-- Vista: Historial del Paciente
+CREATE OR REPLACE VIEW Vista_Historial_Paciente AS
+SELECT 
+    t.Fecha || ' ' || t.Hora AS Fecha_Hora_Turno,
+    c.ID_Consulta,
+    t.ID_Paciente,
+    p.Nombre || ' ' || p.Apellido AS Nombre_Completo_Paciente,
+    e.Nombre AS Especialidad,
+    c.Diagnostico,
+    c.Indicaciones
+
+FROM 
+    Consultas c
+JOIN Turnero t ON c.ID_Turno = t.ID_Turno
+JOIN Pacientes p ON t.ID_Paciente = p.ID_Paciente
+JOIN Medicos m ON t.ID_Medico = m.ID_Medico
+JOIN Especialidades e ON m.ID_Especialidad = e.ID_Especialidad
+;
+
+-- Vista: Atenciones por Obra Social
+CREATE OR REPLACE VIEW Vista_Atenciones_Por_ObraSocial AS
+SELECT 
+    os.Nombre AS ObraSocial,
+    COUNT(c.ID_Consulta) AS Cantidad_Atenciones,
+    COUNT(DISTINCT p.ID_Paciente) AS Cantidad_Pacientes,
+    COUNT(DISTINCT m.ID_Medico) AS Cantidad_Medicos
+FROM 
+    Consultas c
+JOIN Turnero t ON c.ID_Turno = t.ID_Turno
+JOIN Pacientes p ON t.ID_Paciente = p.ID_Paciente
+JOIN ObrasSociales os ON p.ID_ObraSocial = os.ID_ObraSocial
+JOIN Medicos m ON t.ID_Medico = m.ID_Medico
+GROUP BY 
+    os.Nombre;
+
+-- Vista: Pacientes y sus Médicos
+CREATE OR REPLACE VIEW Vista_Pacientes_Medicos AS
+SELECT
+    p.Nombre || ' ' || p.Apellido AS Nombre_Completo__Paciente,
+    m.Nombre || ' ' || m.Apellido AS Nombre_Completo_Medico,
+    e.Nombre AS Especialidad,
+    MAX(t.Fecha) AS Ult_Prox_Registro
+FROM
+    Turnero t
+JOIN Pacientes p ON t.ID_Paciente = p.ID_Paciente
+JOIN Medicos m ON t.ID_Medico = m.ID_Medico
+JOIN Especialidades e ON m.ID_Especialidad = e.ID_Especialidad
+
+GROUP BY
+    p.Nombre || ' ' || p.Apellido, m.Nombre || ' ' || m.Apellido, e.Nombre
+
+ORDER BY 
+    Ult_Prox_Registro desc
+    ;
+
+-- Otorgar permisos de solo lectura a las vistas
+GRANT SELECT ON Vista_Turnos_Por_Medico TO PUBLIC;
+GRANT SELECT ON Vista_Historial_Paciente TO PUBLIC;
+GRANT SELECT ON Vista_Atenciones_Por_ObraSocial TO PUBLIC;
+GRANT SELECT ON Vista_Pacientes_Medicos TO PUBLIC;
+
+-- Insertar valores en Obras Sociales
+INSERT INTO ObrasSociales (ID_ObraSocial, Nombre, Coseguro) VALUES (1, 'PAMI', 0.00);
+INSERT INTO ObrasSociales (ID_ObraSocial, Nombre, Coseguro) VALUES (2, 'APROSS', 2500.00);
+INSERT INTO ObrasSociales (ID_ObraSocial, Nombre, Coseguro) VALUES (3, 'PARTICULAR', 10000.00);
+
+-- Insertar valores en Pacientes
+INSERT INTO Pacientes (ID_Paciente, Nombre, Apellido, DNI, Telefono, Direccion, ID_ObraSocial) 
+VALUES (1, 'Juan', 'Perez', 12345678, '111-1111', 'Calle 123', 1);
+INSERT INTO Pacientes (ID_Paciente, Nombre, Apellido, DNI, Telefono, Direccion, ID_ObraSocial) 
+VALUES (2, 'Maria', 'Lopez', 23456789, '222-2222', 'Avenida 456', 2);
+INSERT INTO Pacientes (ID_Paciente, Nombre, Apellido, DNI, Telefono, Direccion, ID_ObraSocial) 
+VALUES (3, 'Carlos', 'Gomez', 34567890, '333-3333', 'Boulevard 789', 3);
+INSERT INTO Pacientes (ID_Paciente, Nombre, Apellido, DNI, Telefono, Direccion, ID_ObraSocial) 
+VALUES (4, 'Ana', 'Martinez', 45678901, '444-4444', 'Calle 101', 1);
+INSERT INTO Pacientes (ID_Paciente, Nombre, Apellido, DNI, Telefono, Direccion, ID_ObraSocial) 
+VALUES (5, 'Luis', 'Diaz', 56789012, '555-5555', 'Avenida 202', 2);
+INSERT INTO Pacientes (ID_Paciente, Nombre, Apellido, DNI, Telefono, Direccion, ID_ObraSocial) 
+VALUES (6, 'Laura', 'Garcia', 67890123, '666-6666', 'Boulevard 303', 3);
+INSERT INTO Pacientes (ID_Paciente, Nombre, Apellido, DNI, Telefono, Direccion, ID_ObraSocial) 
+VALUES (7, 'Miguel', 'Torres', 78901234, '777-7777', 'Calle 404', 1);
+INSERT INTO Pacientes (ID_Paciente, Nombre, Apellido, DNI, Telefono, Direccion, ID_ObraSocial) 
+VALUES (8, 'Sofia', 'Morales', 89012345, '888-8888', 'Avenida 505', 2);
+INSERT INTO Pacientes (ID_Paciente, Nombre, Apellido, DNI, Telefono, Direccion, ID_ObraSocial) 
+VALUES (9, 'Diego', 'Rojas', 90123456, '999-9999', 'Boulevard 606', 3);
+INSERT INTO Pacientes (ID_Paciente, Nombre, Apellido, DNI, Telefono, Direccion, ID_ObraSocial) 
+VALUES (10, 'Elena', 'Gutierrez', 12345098, '101-0101', 'Calle 707', 1);
+
+-- Insertar valores en Especialidades
+INSERT INTO Especialidades (ID_Especialidad, Nombre) VALUES (1, 'Clínica Médica');
+INSERT INTO Especialidades (ID_Especialidad, Nombre) VALUES (2, 'Cardiología');
+
+-- Insertar valores en Médicos
+INSERT INTO Medicos (ID_Medico, Nombre, Apellido, Matricula, ID_Especialidad) 
+VALUES (1, 'Dr. Pedro', 'Suarez', 'MAT123', 1);
+INSERT INTO Medicos (ID_Medico, Nombre, Apellido, Matricula, ID_Especialidad) 
+VALUES (2, 'Dra. Julia', 'Fernandez', 'MAT124', 2);
+
+-- Insertar valores en Turnero
+INSERT INTO Turnero (ID_Turno, Fecha, Hora, ID_Paciente, ID_Medico) 
+VALUES (1, TO_DATE('2024-06-10', 'YYYY-MM-DD'), '10:00', 1, 1);
+INSERT INTO Turnero (ID_Turno, Fecha, Hora, ID_Paciente, ID_Medico) 
+VALUES (2, TO_DATE('2024-07-12', 'YYYY-MM-DD'), '11:00', 1, 2);
+INSERT INTO Turnero (ID_Turno, Fecha, Hora, ID_Paciente, ID_Medico) 
+VALUES (3, TO_DATE('2024-06-14', 'YYYY-MM-DD'), '12:00', 2, 1);
+INSERT INTO Turnero (ID_Turno, Fecha, Hora, ID_Paciente, ID_Medico) 
+VALUES (4, TO_DATE('2024-07-16', 'YYYY-MM-DD'), '13:00', 2, 2);
+INSERT INTO Turnero (ID_Turno, Fecha, Hora, ID_Paciente, ID_Medico) 
+VALUES (5, TO_DATE('2024-06-18', 'YYYY-MM-DD'), '14:00', 3, 1);
+INSERT INTO Turnero (ID_Turno, Fecha, Hora, ID_Paciente, ID_Medico) 
+VALUES (6, TO_DATE('2024-07-20', 'YYYY-MM-DD'), '15:00', 3, 2);
+INSERT INTO Turnero (ID_Turno, Fecha, Hora, ID_Paciente, ID_Medico) 
+VALUES (7, TO_DATE('2024-06-22', 'YYYY-MM-DD'), '16:00', 4, 1);
+INSERT INTO Turnero (ID_Turno, Fecha, Hora, ID_Paciente, ID_Medico) 
+VALUES (8, TO_DATE('2024-07-24', 'YYYY-MM-DD'), '17:00', 4, 2);
+INSERT INTO Turnero (ID_Turno, Fecha, Hora, ID_Paciente, ID_Medico) 
+VALUES (9, TO_DATE('2024-06-26', 'YYYY-MM-DD'), '10:30', 5, 1);
+INSERT INTO Turnero (ID_Turno, Fecha, Hora, ID_Paciente, ID_Medico) 
+VALUES (10, TO_DATE('2024-07-28', 'YYYY-MM-DD'), '11:30', 5, 2);
+INSERT INTO Turnero (ID_Turno, Fecha, Hora, ID_Paciente, ID_Medico) 
+VALUES (11, TO_DATE('2024-12-11', 'YYYY-MM-DD'), '10:00', 6, 1);
+INSERT INTO Turnero (ID_Turno, Fecha, Hora, ID_Paciente, ID_Medico) 
+VALUES (12, TO_DATE('2024-12-20', 'YYYY-MM-DD'), '11:00', 6, 2);
+INSERT INTO Turnero (ID_Turno, Fecha, Hora, ID_Paciente, ID_Medico) 
+VALUES (13, TO_DATE('2024-12-11', 'YYYY-MM-DD'), '12:00', 7, 1);
+INSERT INTO Turnero (ID_Turno, Fecha, Hora, ID_Paciente, ID_Medico) 
+VALUES (14, TO_DATE('2024-12-20', 'YYYY-MM-DD'), '13:00', 7, 2);
+INSERT INTO Turnero (ID_Turno, Fecha, Hora, ID_Paciente, ID_Medico) 
+VALUES (15, TO_DATE('2024-12-11', 'YYYY-MM-DD'), '14:00', 8, 1);
+INSERT INTO Turnero (ID_Turno, Fecha, Hora, ID_Paciente, ID_Medico) 
+VALUES (16, TO_DATE('2024-12-20', 'YYYY-MM-DD'), '15:00', 8, 2);
+INSERT INTO Turnero (ID_Turno, Fecha, Hora, ID_Paciente, ID_Medico) 
+VALUES (17, TO_DATE('2024-12-11', 'YYYY-MM-DD'), '16:00', 9, 1);
+INSERT INTO Turnero (ID_Turno, Fecha, Hora, ID_Paciente, ID_Medico) 
+VALUES (18, TO_DATE('2024-12-20', 'YYYY-MM-DD'), '17:00', 9, 2);
+INSERT INTO Turnero (ID_Turno, Fecha, Hora, ID_Paciente, ID_Medico) 
+VALUES (19, TO_DATE('2024-12-11', 'YYYY-MM-DD'), '10:30', 10, 1);
+INSERT INTO Turnero (ID_Turno, Fecha, Hora, ID_Paciente, ID_Medico) 
+VALUES (20, TO_DATE('2024-12-20', 'YYYY-MM-DD'), '11:30', 10, 2);
+
+-- Insertar valores en Consultas
+INSERT INTO Consultas (ID_Consulta, ID_Turno, Diagnostico, Indicaciones) 
+VALUES (1, 1, 'Hipertensión leve', 'Tomar medicación y controlar presión semanalmente');
+INSERT INTO Consultas (ID_Consulta, ID_Turno, Diagnostico, Indicaciones) 
+VALUES (2, 2, 'Arritmia', 'Evitar estrés y realizar chequeo en un mes');
+INSERT INTO Consultas (ID_Consulta, ID_Turno, Diagnostico, Indicaciones) 
+VALUES (3, 3, 'Gripe común', 'Reposo y medicación para fiebre');
+INSERT INTO Consultas (ID_Consulta, ID_Turno, Diagnostico, Indicaciones) 
+VALUES (4, 4, 'Dolor lumbar', 'Fisioterapia 2 veces por semana');
+INSERT INTO Consultas (ID_Consulta, ID_Turno, Diagnostico, Indicaciones) 
+VALUES (5, 5, 'Migraña', 'Evitar pantallas y tomar medicación recetada');
+INSERT INTO Consultas (ID_Consulta, ID_Turno, Diagnostico, Indicaciones) 
+VALUES (6, 6, 'Insomnio', 'Realizar ejercicios de relajación y evitar cafeína');
+INSERT INTO Consultas (ID_Consulta, ID_Turno, Diagnostico, Indicaciones) 
+VALUES (7, 7, 'Resfriado', 'Reposo y aumentar consumo de líquidos');
+INSERT INTO Consultas (ID_Consulta, ID_Turno, Diagnostico, Indicaciones) 
+VALUES (8, 8, 'Faringitis', 'Hacer gárgaras con agua tibia y medicación recetada');
+INSERT INTO Consultas (ID_Consulta, ID_Turno, Diagnostico, Indicaciones) 
+VALUES (9, 9, 'Colesterol alto', 'Modificar dieta y ejercicio regular');
+INSERT INTO Consultas (ID_Consulta, ID_Turno, Diagnostico, Indicaciones) 
+VALUES (10, 10, 'Diabetes tipo 2', 'Controlar niveles de azúcar y seguir dieta indicada');
